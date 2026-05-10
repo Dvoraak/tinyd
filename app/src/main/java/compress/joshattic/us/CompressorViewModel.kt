@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import java.io.File
-import java.util.UUID
+import androidx.core.content.edit
 
 enum class QualityPreset {
     HIGH, MEDIUM, LOW, CUSTOM
@@ -77,7 +77,7 @@ data class CompressorUiState(
     val totalSavedBytes: Long = 0L,
     
     val supportedCodecs: List<String> = emptyList(),
-    val appInfoVersion: String = "1.5.3",
+    val appInfoVersion: String = "1.5.4",
     val showBitrate: Boolean = false,
     val useMbps: Boolean = false,
     val hasShared: Boolean = false,
@@ -584,7 +584,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     fun toggleShowBitrate() {
         _uiState.update { 
             val newValue = !it.showBitrate
-            prefs.edit().putBoolean("show_bitrate", newValue).apply()
+            prefs.edit { putBoolean("show_bitrate", newValue) }
             it.copy(showBitrate = newValue)
         }
     }
@@ -592,7 +592,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     fun toggleBitrateUnit() {
         _uiState.update { 
             val newValue = !it.useMbps
-            prefs.edit().putBoolean("use_mbps", newValue).apply()
+            prefs.edit { putBoolean("use_mbps", newValue) }
             it.copy(useMbps = newValue)
         }
     }
@@ -649,10 +649,6 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         activeTransformer?.cancel()
         compressionJob?.cancel()
         _uiState.update { it.copy(isCompressing = false, progress = 0f) }
-    }
-    
-    fun resetSaveSuccess() {
-        _uiState.update { it.copy(saveSuccess = false) }
     }
     
     private fun clearCache() {
@@ -766,7 +762,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                      
                      if (savedBytes > 0) {
                          newTotal += savedBytes
-                         prefs.edit().putLong("total_saved_bytes", newTotal).apply()
+                         prefs.edit { putLong("total_saved_bytes", newTotal) }
                      }
 
                      _uiState.update { 
@@ -934,7 +930,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val sourceMime = sourceInfo?.mimeType ?: state.originalVideoMime
         val sourceWidth = sourceInfo?.width ?: 0
         val sourceHeight = sourceInfo?.height ?: 0
-        val sourceFps = if (sourceInfo?.frameRate ?: 0f > 0f) sourceInfo!!.frameRate else state.originalFps
+        val sourceFps = if ((sourceInfo?.frameRate ?: 0f) > 0f) sourceInfo!!.frameRate else state.originalFps
 
         if (!sourceMime.isNullOrBlank() && sourceWidth > 0 && sourceHeight > 0) {
             val decoderSupported = isCodecConfigurationSupported(
@@ -1070,8 +1066,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val retriever = android.media.MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
-            // METADATA_KEY_COLOR_TRANSFER (36) is available on API 24+
-            if (Build.VERSION.SDK_INT >= 24) {
+            // METADATA_KEY_COLOR_TRANSFER (36) is available on API 30+
+            if (Build.VERSION.SDK_INT >= 30) {
                val transfer = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_COLOR_TRANSFER)
                // 6 = ST2084 (PQ), 7 = HLG
                return transfer == "6" || transfer == "7"
