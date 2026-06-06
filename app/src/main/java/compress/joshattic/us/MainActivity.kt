@@ -1271,18 +1271,38 @@ fun VideoOptionsTab(state: CompressorUiState, viewModel: CompressorViewModel) {
                 )
             }
             
-             Slider(
-                value = sliderValue,
-                onValueChange = { 
+            val minSize = 0.1f
+            val maxSize = maxOf(10f, state.targetSizeMb, (state.originalSize / (1024f*1024f)))
+            
+            val sliderFraction = if (maxSize > minSize) {
+                (kotlin.math.ln(sliderValue / minSize) / kotlin.math.ln(maxSize / minSize)).toFloat().coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+
+            Slider(
+                value = sliderFraction,
+                onValueChange = { fraction ->
                     isUserInteracting = true
-                    sliderValue = it
-                    viewModel.setTargetSize(it)
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val calculatedSize = minSize * kotlin.math.exp(fraction * kotlin.math.ln(maxSize / minSize)).toFloat()
+                    
+                    val roundedSize = when {
+                        calculatedSize < 2.5f -> kotlin.math.round(calculatedSize * 10f) / 10f
+                        calculatedSize < 10f -> kotlin.math.round(calculatedSize * 2f) / 2f
+                        calculatedSize < 50f -> kotlin.math.round(calculatedSize)
+                        else -> kotlin.math.round(calculatedSize / 5f) * 5f
+                    }.coerceIn(minSize, maxSize)
+
+                    if (sliderValue != roundedSize) {
+                        sliderValue = roundedSize
+                        viewModel.setTargetSize(roundedSize)
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
                 },
                 onValueChangeFinished = {
                     isUserInteracting = false
                 },
-                valueRange = 0.1f..maxOf(10f, state.targetSizeMb, (state.originalSize / (1024f*1024f))),
+                valueRange = 0f..1f,
                 steps = 0
             )
             Row(
