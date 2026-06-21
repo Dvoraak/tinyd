@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.io.File
 import androidx.core.content.edit
@@ -417,89 +418,91 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     private var activeTransformer: Transformer? = null
 
     fun updateSelectedUri(context: Context, uri: Uri) {
-        var size = 0L
-        var width = 0
-        var height = 0
-        var bitrate = 0
-        var audioBitrate = 0
-        var fps = 30f
-        var videoMime: String? = null
-        var duration = 0L
-        var originalName: String? = null
-        
-        try {
-            audioBitrate = getAudioBitrate(context, uri)
-            val videoInfo = getVideoTrackInfo(context, uri)
-            videoMime = videoInfo?.mimeType
-            context.contentResolver.openFileDescriptor(uri, "r")?.use {
-                size = it.statSize
-            }
-            val retriever = android.media.MediaMetadataRetriever()
-            retriever.setDataSource(context, uri)
-            
-            width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            
-            val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            if (rotation == 90 || rotation == 270) {
-                val temp = width
-                width = height
-                height = temp
-            }
-            
-            bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
-            duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            
-            // FPS extraction is flaky, sometimes in CAPTURE_FRAMERATE or needs calculation
-            val fpsStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE) 
-            fps = fpsStr?.toFloatOrNull() ?: 0f
-            if (fps <= 0f && videoInfo != null && videoInfo.frameRate > 0f) {
-                fps = videoInfo.frameRate
-            }
-            if (fps <= 0f) {
-                fps = 30f
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            var size = 0L
+            var width = 0
+            var height = 0
+            var bitrate = 0
+            var audioBitrate = 0
+            var fps = 30f
+            var videoMime: String? = null
+            var duration = 0L
+            var originalName: String? = null
 
-            val cursor = context.contentResolver.query(uri, null, null, null, null)
-            if (cursor != null && cursor.moveToFirst()) {
-                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (nameIndex != -1) {
-                    originalName = cursor.getString(nameIndex)
+            try {
+                audioBitrate = getAudioBitrate(context, uri)
+                val videoInfo = getVideoTrackInfo(context, uri)
+                videoMime = videoInfo?.mimeType
+                context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                    size = it.statSize
                 }
-                cursor.close()
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, uri)
+
+                width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+
+                val rotation = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (rotation == 90 || rotation == 270) {
+                    val temp = width
+                    width = height
+                    height = temp
+                }
+
+                bitrate = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull() ?: 0
+                duration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+
+                // FPS extraction is flaky, sometimes in CAPTURE_FRAMERATE or needs calculation
+                val fpsStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                fps = fpsStr?.toFloatOrNull() ?: 0f
+                if (fps <= 0f && videoInfo != null && videoInfo.frameRate > 0f) {
+                    fps = videoInfo.frameRate
+                }
+                if (fps <= 0f) {
+                    fps = 30f
+                }
+
+                val cursor = context.contentResolver.query(uri, null, null, null, null)
+                if (cursor != null && cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) {
+                        originalName = cursor.getString(nameIndex)
+                    }
+                    cursor.close()
+                }
+
+                retriever.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
 
-            retriever.release()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            val defaultTargetMb = if (size > 0) (size / (1024.0 * 1024.0) * 0.7).toFloat() else 10f
+
+            val currentSavedBytes = _uiState.value.totalSavedBytes
+            val showBitrate = _uiState.value.showBitrate
+            val useMbps = _uiState.value.useMbps
+            val supportedCodecs = _uiState.value.supportedCodecs
+
+            _uiState.value = CompressorUiState(
+                selectedUri = uri,
+                originalSize = size,
+                originalWidth = width,
+                originalHeight = height,
+                originalBitrate = bitrate,
+                originalAudioBitrate = audioBitrate,
+                originalFps = fps,
+                originalVideoMime = videoMime,
+                durationMs = duration,
+                originalName = originalName,
+                targetSizeMb = defaultTargetMb,
+                targetResolutionHeight = height,
+                activePreset = QualityPreset.HIGH,
+                totalSavedBytes = currentSavedBytes,
+                showBitrate = showBitrate,
+                useMbps = useMbps,
+                supportedCodecs = supportedCodecs
+            ).autoAdjust(defaultTargetMb)
         }
-
-        val defaultTargetMb = if (size > 0) (size / (1024.0 * 1024.0) * 0.7).toFloat() else 10f
-
-        val currentSavedBytes = _uiState.value.totalSavedBytes
-        val showBitrate = _uiState.value.showBitrate
-        val useMbps = _uiState.value.useMbps
-        val supportedCodecs = _uiState.value.supportedCodecs
-
-        _uiState.value = CompressorUiState(
-            selectedUri = uri,
-            originalSize = size,
-            originalWidth = width,
-            originalHeight = height,
-            originalBitrate = bitrate,
-            originalAudioBitrate = audioBitrate,
-            originalFps = fps,
-            originalVideoMime = videoMime,
-            durationMs = duration,
-            originalName = originalName,
-            targetSizeMb = defaultTargetMb,
-            targetResolutionHeight = height,
-            activePreset = QualityPreset.HIGH,
-            totalSavedBytes = currentSavedBytes,
-            showBitrate = showBitrate,
-            useMbps = useMbps,
-            supportedCodecs = supportedCodecs
-        ).autoAdjust(defaultTargetMb)
     }
     
     fun markAsShared() {
@@ -688,14 +691,14 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
-    fun startCompression(context: Context) {
+    fun startCompression(context: Context) = viewModelScope.launch(Dispatchers.Main) {
         val currentState = _uiState.value
-        val inputUri = currentState.selectedUri ?: return
+        val inputUri = currentState.selectedUri ?: return@launch
 
-        val plan = buildCompressionPlan(context, currentState, inputUri)
+        val plan = withContext(Dispatchers.IO) { buildCompressionPlan(context, currentState, inputUri) }
         if (plan.blockingError != null) {
             _uiState.update { it.copy(error = plan.blockingError, errorLog = null, isCompressing = false) }
-            return
+            return@launch
         }
 
         _uiState.update {
@@ -722,11 +725,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
         val targetBitrate = currentState.targetBitrate.toLong()
 
+        // getAudioBitrate uses MediaExtractor (I/O) — resolve it on IO before building the transformer
         val audioBitrateToUse = if (currentState.audioBitrate == 0) {
-            val original = getAudioBitrate(context, inputUri)
+            val original = kotlinx.coroutines.withContext(Dispatchers.IO) { getAudioBitrate(context, inputUri) }
             if (original > 0) original else 256_000
         } else {
-             currentState.audioBitrate
+            currentState.audioBitrate
         }
 
         val videoMimeType = plan.outputVideoMimeType
@@ -1147,7 +1151,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val currentState = _uiState.value
         val compressedUri = currentState.compressedUri ?: return
         
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = File(compressedUri.path!!)
                 if (!file.exists()) {
