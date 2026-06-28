@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#6FA450</color>
+    <!-- Material Green 800 — chosen so the fork's launcher icon reads as
+         "obviously green" at the small sizes Android renders it, and so it
+         clearly differs from upstream's muted #6FA450. -->
+    <color name="ic_launcher_background">#2E7D32</color>
 </resources>

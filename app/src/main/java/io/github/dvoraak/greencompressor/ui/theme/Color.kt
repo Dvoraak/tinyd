@@ -1,4 +1,4 @@
-package compress.joshattic.us.ui.theme
+package io.github.dvoraak.greencompressor.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

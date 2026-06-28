@@ -24,4 +24,5 @@ output-metadata.json
 *.apk
 *.log
 app/release/baselineProfiles/0/app-release.dm
-app/release/baselineProfiles/0/app-release.dmCLAUDE.md
+CLAUDE.md
+.claude/

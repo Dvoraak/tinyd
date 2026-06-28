@@ -1,4 +1,4 @@
-package compress.joshattic.us
+package io.github.dvoraak.greencompressor
 
 import java.io.File
 import java.io.RandomAccessFile

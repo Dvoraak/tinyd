@@ -5,17 +5,23 @@ plugins {
 }
 
 android {
-    namespace = "compress.joshattic.us"
+    namespace = "io.github.dvoraak.greencompressor"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "compress.joshattic.us"
+        // Distinct applicationId is THE thing that makes Android (and Obtainium)
+        // treat Green Compressor as a separate app from upstream Compressor.
+        // Without this, installing v1.0.0 on a phone that already has 1.5.7
+        // would either be rejected (signature mismatch) or silently replace it.
+        applicationId = "io.github.dvoraak.greencompressor"
         minSdk = 24
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.6.0-archive"
+        // Reset to 1 / 1.0.0 — this is the first release of Green Compressor
+        // as its own app, not a continuation of upstream's version numbers.
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

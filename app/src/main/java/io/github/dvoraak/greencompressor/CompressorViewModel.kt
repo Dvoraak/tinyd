@@ -1,4 +1,4 @@
-package compress.joshattic.us
+package io.github.dvoraak.greencompressor
 
 import android.app.Application
 import android.content.ContentValues
@@ -91,7 +91,7 @@ data class CompressorUiState(
     val totalSavedBytes: Long = 0L,
 
     val supportedCodecs: List<String> = emptyList(),
-    val appInfoVersion: String = "1.6.0-archive",
+    val appInfoVersion: String = "1.0.0",
     val showBitrate: Boolean = false,
     val useMbps: Boolean = false,
     val hasShared: Boolean = false,

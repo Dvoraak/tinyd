@@ -1,4 +1,4 @@
-package compress.joshattic.us
+package io.github.dvoraak.greencompressor
 
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -66,7 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.FileProvider
-import compress.joshattic.us.ui.theme.CompressorTheme
+import io.github.dvoraak.greencompressor.ui.theme.CompressorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -472,7 +472,7 @@ fun CompressionFailedScreen(state: CompressorUiState, onBack: () -> Unit, onSave
                     
                     TextButton(
                         onClick = {
-                            uriHandler.openUri("https://github.com/JoshAtticus/Compressor/issues")
+                            uriHandler.openUri("https://github.com/Dvoraak/green-compressor/issues")
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -703,13 +703,16 @@ fun ResultScreen(
         
         Spacer(modifier = Modifier.height(24.dp))
         
+        // The upstream "buy me a coffee" link goes to JoshAtticus; this fork swaps it
+        // for an attribution line that links back to the original project — MIT
+        // requires preserving the copyright notice, this surfaces it in-app too.
         TextButton(
-            onClick = { uriHandler.openUri("https://buymeacoffee.com/joshatticus") }
+            onClick = { uriHandler.openUri("https://github.com/JoshAtticus/Compressor") }
         ) {
              Text(
-                stringResource(R.string.buy_coffee),
+                stringResource(R.string.attribution_upstream),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.tertiary
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
     }
@@ -733,7 +736,7 @@ fun InfoDialog(
         title = {
             Column {
                  Text(stringResource(R.string.info_title), style = MaterialTheme.typography.titleLarge)
-                 Text("Compressor v${state.appInfoVersion}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                 Text("Green Compressor v${state.appInfoVersion}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         text = {
@@ -793,10 +796,20 @@ fun InfoDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/JoshAtticus/Compressor") },
+                    onClick = { uriHandler.openUri("https://github.com/Dvoraak/green-compressor") },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.view_on_github))
+                }
+                TextButton(
+                    onClick = { uriHandler.openUri("https://github.com/JoshAtticus/Compressor") },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        stringResource(R.string.attribution_upstream),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         },
