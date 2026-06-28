@@ -91,7 +91,7 @@ data class CompressorUiState(
     val totalSavedBytes: Long = 0L,
 
     val supportedCodecs: List<String> = emptyList(),
-    val appInfoVersion: String = "1.0.0",
+    val appInfoVersion: String = "1.0.1",
     val showBitrate: Boolean = false,
     val useMbps: Boolean = false,
     val hasShared: Boolean = false,
@@ -441,6 +441,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
     private var compressionJob: Job? = null
     private var activeTransformer: Transformer? = null
+    @Volatile private var batchCancelled: Boolean = false
+
+    companion object {
+        private const val TAG = "GreenCompressor"
+    }
 
     fun updateSelectedUri(context: Context, uri: Uri) {
         loadSelectedUri(context, uri, preserveBatchAndPreset = false)
@@ -840,9 +845,26 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     }
     
     fun cancelCompression() {
+        android.util.Log.i(TAG, "cancelCompression invoked, batchActive=${_uiState.value.batchActive}")
         activeTransformer?.cancel()
         compressionJob?.cancel()
-        _uiState.update { it.copy(isCompressing = false, progress = 0f) }
+        batchCancelled = true
+        _uiState.update {
+            it.copy(
+                isCompressing = false,
+                progress = 0f,
+                // Critical: clear batchActive so the outer `showCompressing` check in
+                // MainActivity stops forcing CompressingScreen. Without this, batch
+                // users tap Cancel and the screen never goes away.
+                batchActive = false,
+                batchQueue = emptyList(),
+                batchIndex = 0,
+                batchResults = emptyList(),
+                batchInPlace = false,
+                batchComplete = false,
+                pendingDeleteUris = emptyList(),
+            )
+        }
     }
     
     private fun clearCache() {
@@ -884,13 +906,28 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun startCompression(context: Context) = viewModelScope.launch(Dispatchers.Main) {
         val currentState = _uiState.value
-        val inputUri = currentState.selectedUri ?: return@launch
+        val inputUri = currentState.selectedUri ?: run {
+            android.util.Log.w(TAG, "startCompression: selectedUri is null, aborting")
+            return@launch
+        }
+        // Fresh start clears the per-run cancel flag — without this, a Transformer that
+        // legitimately finishes after a previous cancel could be misclassified as cancelled.
+        batchCancelled = false
+        android.util.Log.i(
+            TAG,
+            "startCompression uri=$inputUri name=${currentState.originalName} " +
+                "size=${currentState.originalSize} ${currentState.originalWidth}x${currentState.originalHeight}@${currentState.originalFps}fps " +
+                "codec=${currentState.videoCodec} targetH=${currentState.targetResolutionHeight} " +
+                "batchIdx=${currentState.batchIndex}/${currentState.batchQueue.size}"
+        )
 
         val plan = withContext(Dispatchers.IO) { buildCompressionPlan(context, currentState, inputUri) }
         if (plan.blockingError != null) {
+            android.util.Log.e(TAG, "buildCompressionPlan blocking: ${plan.blockingError}")
             _uiState.update { it.copy(error = plan.blockingError, errorLog = null, isCompressing = false) }
             return@launch
         }
+        android.util.Log.i(TAG, "Plan: mime=${plan.outputVideoMimeType} h=${plan.outputHeight} fps=${plan.outputFps} warnings=${plan.warnings.size}")
 
         _uiState.update {
             it.copy(
@@ -989,6 +1026,11 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             .setEncoderFactory(encoderFactory)
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    android.util.Log.i(
+                        TAG,
+                        "Transformer.onCompleted batchIdx=${_uiState.value.batchIndex}/${_uiState.value.batchQueue.size} " +
+                            "outputSize=${outputFile.length()} name=${currentState.originalName}"
+                    )
                     // Stamp the cached file with date + GPS BEFORE it gets copied into MediaStore.
                     // Doing it here (single place, after every successful encode) keeps mono and
                     // batch paths in sync — both save flows just copy the patched bytes.
@@ -1030,6 +1072,13 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                    android.util.Log.e(
+                        TAG,
+                        "Transformer.onError code=${exportException.errorCode} " +
+                            "batchIdx=${_uiState.value.batchIndex}/${_uiState.value.batchQueue.size} " +
+                            "msg=${exportException.message}",
+                        exportException
+                    )
                     val app = getApplication<Application>()
                     val isCodecError = exportException.errorCode == ExportException.ERROR_CODE_DECODER_INIT_FAILED ||
                         exportException.errorCode == ExportException.ERROR_CODE_ENCODER_INIT_FAILED
@@ -1037,6 +1086,8 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                     val isEncoderInitError = exportException.errorCode == ExportException.ERROR_CODE_ENCODER_INIT_FAILED
                     val isMuxerError = exportException.errorCode == ExportException.ERROR_CODE_MUXING_FAILED
                     val isHuawei = android.os.Build.MANUFACTURER.equals("HUAWEI", ignoreCase = true)
+                    val isCancelled = exportException.errorCode == ExportException.ERROR_CODE_FAILED_RUNTIME_CHECK ||
+                        batchCancelled // best-effort detection of user-triggered cancel
 
                     val errorMsg = when {
                         isMuxerError && isHuawei -> app.getString(R.string.error_huawei_muxer)
@@ -1046,8 +1097,15 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         else -> exportException.localizedMessage ?: app.getString(R.string.error_unknown)
                     }
 
+                    // User pressed Cancel mid-batch: bail out entirely, don't try the next item.
+                    // cancelCompression() already cleared batch state — just don't undo that.
+                    if (isCancelled) {
+                        android.util.Log.i(TAG, "Treating onError as cancellation; not advancing batch")
+                        return
+                    }
+
                     // In batch mode, one item failing must not kill the rest of the queue.
-                    // Record the failure and advance so the user gets a per-item summary at the end.
+                    // Record the failure (visible in BatchSummary) and advance.
                     if (_uiState.value.isBatch) {
                         val cur = _uiState.value
                         val failed = BatchItemResult(
@@ -1061,8 +1119,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
                         _uiState.update {
                             it.copy(
                                 isCompressing = false,
-                                error = null,
-                                errorLog = null,
+                                // Surface the most recent batch error in the UI too, so a
+                                // silent run of failures isn't invisible — the user can see
+                                // "encoder init failed" right when it happens on the
+                                // compressing screen, not only at the very end.
+                                error = errorMsg,
+                                errorLog = exportException.stackTraceToString(),
                                 batchResults = it.batchResults + failed,
                             )
                         }
@@ -1138,18 +1200,47 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         .setHdrMode(hdrMode)
         .build()
 
-        transformer.start(composition, outputPath)
-        
+        android.util.Log.i(TAG, "Transformer.start outputPath=$outputPath hdrMode=$hdrMode")
+        try {
+            transformer.start(composition, outputPath)
+        } catch (t: Throwable) {
+            // start() is documented to throw IllegalStateException if called twice without
+            // a reset, but in practice it can also throw if the muxer can't open the
+            // output file. Surface that instead of letting the user stare at 0%.
+            android.util.Log.e(TAG, "Transformer.start threw", t)
+            _uiState.update {
+                it.copy(
+                    isCompressing = false,
+                    error = "Transformer failed to start: ${t.message}",
+                    errorLog = t.stackTraceToString(),
+                )
+            }
+            return@launch
+        }
+
         compressionJob = viewModelScope.launch {
+            var ticks = 0
             while (_uiState.value.isCompressing) {
                 val progressHolder = androidx.media3.transformer.ProgressHolder()
                 val state = transformer.getProgress(progressHolder)
                 if (state != Transformer.PROGRESS_STATE_NOT_STARTED) {
-                    val currentSize = if(outputFile.exists()) outputFile.length() else 0L
+                    val currentSize = if (outputFile.exists()) outputFile.length() else 0L
                     _uiState.update { it.copy(progress = progressHolder.progress / 100f, currentOutputSize = currentSize) }
                 }
+                // Once a second, log the polling state so a user reading logcat can tell
+                // whether Transformer is genuinely stuck in NOT_STARTED (codec hung) or
+                // actively encoding but reporting UNAVAILABLE (still initializing).
+                if (ticks % 5 == 0) {
+                    android.util.Log.d(
+                        TAG,
+                        "poll state=$state progress=${progressHolder.progress}% " +
+                            "fileExists=${outputFile.exists()} size=${if (outputFile.exists()) outputFile.length() else 0L}"
+                    )
+                }
+                ticks++
                 kotlinx.coroutines.delay(200)
             }
+            android.util.Log.i(TAG, "poll loop exited after $ticks ticks")
         }
     }
 
