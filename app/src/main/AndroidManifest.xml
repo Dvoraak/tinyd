@@ -18,6 +18,18 @@
          URI to hand to the system dialog. -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
+    <!-- Foreground service group, all for the same job: pinning the process
+         alive while a batch transcode runs so Android's Doze / app-standby
+         heuristics don't suspend Media3 mid-encode when the user locks the
+         screen or switches apps. The mediaProcessing service type is the
+         Android-14+ category explicitly designed for "transcode media in
+         the background" with a 6h-per-session cap (we never come close).
+         POST_NOTIFICATIONS is a runtime grant on Android 13+ and is what
+         lets us show the persistent progress notification + cancel button. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -47,7 +59,7 @@
             </intent-filter>
 
             <!-- Handle multiple shared videos (e.g. share sheet "select multiple"
-                 → Green Compressor). Routes into the same batch queue the in-app
+                 → Tinyd). Routes into the same batch queue the in-app
                  picker uses. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
@@ -65,6 +77,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
         </provider>
+
+        <service
+            android:name=".CompressionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProcessing" />
     </application>
 
 </manifest>

@@ -1,4 +1,4 @@
-package io.github.dvoraak.greencompressor
+package io.github.dvoraak.tinyd
 
 import android.app.Application
 import android.content.ContentValues
@@ -106,7 +106,7 @@ data class CompressorUiState(
     val totalSavedBytes: Long = 0L,
 
     val supportedCodecs: List<String> = emptyList(),
-    val appInfoVersion: String = "1.0.0",
+    val appInfoVersion: String = "2.0.0",
     val showBitrate: Boolean = false,
     val useMbps: Boolean = false,
     val hasShared: Boolean = false,
@@ -387,8 +387,12 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         val blockingError: String?
     )
 
-    private val _uiState = MutableStateFlow(CompressorUiState())
-    val uiState = _uiState.asStateFlow()
+    // _uiState is process-scoped (see [CompressionStore]) so it survives an
+    // Activity destruction while a foreground-service-pinned compression is
+    // still running. A getter rather than a val so every read returns the
+    // live singleton — there's no caching surface for stale references.
+    private val _uiState: MutableStateFlow<CompressorUiState> get() = CompressionStore.state
+    val uiState: kotlinx.coroutines.flow.StateFlow<CompressorUiState> = CompressionStore.state.asStateFlow()
     
     private val prefs: SharedPreferences by lazy {
         getApplication<Application>().getSharedPreferences("compressor_prefs", Context.MODE_PRIVATE)
@@ -404,8 +408,31 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
             useMbps = useMbps
         ) }
         checkSupportedCodecs()
+
+        // If the previous Activity that owned the encode died mid-flight while
+        // the service kept us alive, the singleton can still claim isCompressing=true
+        // even though no Transformer is actually running anymore. Reset just those
+        // ephemeral flags — keep the batch queue / pendingFinalizations / etc.
+        // so the user can pick up where they left off (or so the delete-dialog
+        // LaunchedEffect can finally fire).
+        val s = _uiState.value
+        if (s.isCompressing) {
+            android.util.Log.i(TAG, "Init: clearing stale isCompressing from a prior ViewModel that died mid-encode")
+            _uiState.update { it.copy(isCompressing = false, progress = 0f, currentOutputSize = 0L) }
+        }
+
         clearCache()
         recoverOrphanedPending()
+
+        // The notification's "Cancel" action posts into this channel.
+        // (The service itself reads CompressionStore directly, so we don't
+        // need to mirror state through CompressionEvents anymore.)
+        viewModelScope.launch {
+            CompressionEvents.cancelRequested.collect {
+                android.util.Log.i(TAG, "cancelRequested received from notification")
+                cancelCompression()
+            }
+        }
     }
 
     /**
@@ -422,6 +449,25 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun recoverOrphanedPending() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val current = _uiState.value
+        if (current.pendingFinalizations.isNotEmpty() ||
+            current.pendingDeleteUris.isNotEmpty() ||
+            current.batchActive) {
+            // Don't preempt an in-flight finalize. The state singleton tells us
+            // the user is still mid-flow (delete dialog pending, or about to
+            // resume after backgrounding). The compressed copies waiting with
+            // IS_PENDING=1 are about to be renamed to the originals' names —
+            // recovering them here would put them in Movies/Compressor with
+            // Recovered_* names and break the seamless replace flow.
+            android.util.Log.i(
+                TAG,
+                "Skipping recovery — batch is mid-finalize " +
+                    "(pendingFinalizations=${current.pendingFinalizations.size}, " +
+                    "pendingDeleteUris=${current.pendingDeleteUris.size}, " +
+                    "batchActive=${current.batchActive})"
+            )
+            return
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val context = getApplication<Application>()
@@ -529,7 +575,7 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     @Volatile private var batchCancelled: Boolean = false
 
     companion object {
-        private const val TAG = "GreenCompressor"
+        private const val TAG = "Tinyd"
     }
 
     fun updateSelectedUri(context: Context, uri: Uri) {

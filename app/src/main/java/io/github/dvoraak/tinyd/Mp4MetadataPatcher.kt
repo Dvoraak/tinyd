@@ -1,4 +1,4 @@
-package io.github.dvoraak.greencompressor
+package io.github.dvoraak.tinyd
 
 import java.io.File
 import java.io.RandomAccessFile

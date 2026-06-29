@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Green Compressor</string>
-    <string name="title_compressor">Green Compressor</string>
+    <string name="app_name">Tinyd</string>
+    <string name="title_compressor">Tinyd</string>
     <string name="share">Share</string>
     <string name="saved">Saved</string>
     <string name="save_to_photos">Save to Photos</string>
@@ -131,4 +131,15 @@
     <string name="batch_summary_failures">%1$d failed</string>
     <string name="batch_summary_done">Done</string>
     <string name="attribution_upstream">Based on Compressor by JoshAtticus (MIT)</string>
+
+    <!-- Foreground service notification -->
+    <string name="notif_channel_name">Compression</string>
+    <string name="notif_channel_description">Persistent notification while a batch transcode runs</string>
+    <string name="notif_default_text">Compressing video…</string>
+    <string name="notif_text_mono">Compressing %1$s</string>
+    <string name="notif_text_batch">Compressing %1$d of %2$d · %3$s</string>
+    <string name="notif_text_compressing">Compressing %1$s</string>
+    <string name="notif_text_awaiting_delete">Awaiting confirmation to delete %1$d original(s) — tap to open</string>
+    <string name="notif_text_finalizing">Finalizing replacement…</string>
+    <string name="notif_text_replacing">Replacing %1$d original(s) — tap to confirm</string>
 </resources>

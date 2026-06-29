@@ -1,4 +1,4 @@
-package io.github.dvoraak.greencompressor
+package io.github.dvoraak.tinyd
 
 import android.annotation.SuppressLint
 import android.content.Intent
@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,7 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.FileProvider
-import io.github.dvoraak.greencompressor.ui.theme.CompressorTheme
+import io.github.dvoraak.tinyd.ui.theme.CompressorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -112,6 +113,15 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             perms.add(android.Manifest.permission.READ_MEDIA_VIDEO)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            // Notification permission is what lets the foreground service
+            // surface its progress + cancel button. Without it the service
+            // still runs (the foreground notification is mandatory regardless),
+            // it just sits silently in the notification drawer.
+            perms.add(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         if (perms.isNotEmpty()) {
             mediaPermissionsLauncher.launch(perms.toTypedArray())
@@ -233,22 +243,64 @@ fun CompressorApp(viewModel: CompressorViewModel) {
         viewModel.finalizeInPlace(context, confirmed)
     }
 
+    // Promote the process to a foregroundService whenever a compression starts.
+    // The service self-stops once deriveNotificationState(CompressionStore.state).active = false
+    // (i.e. when isCompressing, batchActive, pendingFinalizations, and
+    // pendingDeleteUris are all clear), so we only need to fire-and-forget on
+    // the leading edge. Idempotent — repeated calls just refresh the service.
+    LaunchedEffect(state.isCompressing, state.batchActive) {
+        if (state.isCompressing || state.batchActive) {
+            CompressionService.ensureRunning(context)
+        }
+    }
+
+    // After the service hands off to its "Replacing N original(s)" notification
+    // and exits, the activity is responsible for dismissing that notification
+    // when the user finishes the flow — otherwise it sticks around in the
+    // drawer with no service backing it.
+    LaunchedEffect(state.pendingDeleteUris, state.pendingFinalizations) {
+        if (state.pendingDeleteUris.isEmpty() && state.pendingFinalizations.isEmpty()) {
+            androidx.core.app.NotificationManagerCompat.from(context)
+                .cancel(CompressionService.NOTIFICATION_ID_DONE)
+        }
+    }
+
     // When the batch finishes with in-place ON, batch-end emits a list of URIs to delete.
     // We bundle them into one createDeleteRequest so the user gets ONE confirm dialog for
     // the whole batch instead of one per file.
+    //
+    // The signature guard below dedups across Activity recreation: if Android tears down
+    // and rebuilds the Activity while the system delete dialog is up, the new
+    // LaunchedEffect would otherwise fire a second dialog on top of the first. We persist
+    // the "already fired for these URIs" signature in SavedInstanceState so the new
+    // composition can recognize it as a repeat.
+    var dialogFiredFor by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(state.pendingDeleteUris) {
         val urisToDelete = state.pendingDeleteUris
+        val signature = urisToDelete.joinToString("|") { it.toString() }
         android.util.Log.i(
-            "GreenCompressor",
-            "LaunchedEffect(pendingDeleteUris) size=${urisToDelete.size} sdk=${android.os.Build.VERSION.SDK_INT}"
+            "Tinyd",
+            "LaunchedEffect(pendingDeleteUris) size=${urisToDelete.size} sdk=${android.os.Build.VERSION.SDK_INT} sigMatchesLast=${signature == dialogFiredFor && signature.isNotEmpty()}"
         )
-        if (urisToDelete.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        if (urisToDelete.isEmpty()) {
+            dialogFiredFor = ""
+            return@LaunchedEffect
+        }
+        if (signature == dialogFiredFor) {
+            // Already showed (or just showed) a dialog for this exact set. The
+            // user's existing dialog is either still on screen or they already
+            // resolved it and finalizeInPlace is about to clear the list.
+            android.util.Log.i("Tinyd", "Skipping duplicate dialog launch for $signature")
+            return@LaunchedEffect
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            dialogFiredFor = signature
             try {
                 val pendingIntent = android.provider.MediaStore.createDeleteRequest(
                     context.contentResolver,
                     urisToDelete
                 )
-                android.util.Log.i("GreenCompressor", "createDeleteRequest built, launching IntentSender")
+                android.util.Log.i("Tinyd", "createDeleteRequest built, launching IntentSender")
                 val request = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
                 deleteOriginalsLauncher.launch(request)
             } catch (e: Exception) {
@@ -256,11 +308,11 @@ fun CompressorApp(viewModel: CompressorViewModel) {
                 // pending in-place saves still get unpended and moved out of
                 // the originals' folder. Without this they'd stay IS_PENDING
                 // forever and the user would lose their compressed copy.
-                android.util.Log.e("GreenCompressor", "createDeleteRequest failed", e)
+                android.util.Log.e("Tinyd", "createDeleteRequest failed", e)
                 viewModel.finalizeInPlace(context, confirmed = false)
             }
         } else if (urisToDelete.isNotEmpty()) {
-            android.util.Log.w("GreenCompressor", "API ${android.os.Build.VERSION.SDK_INT} too old for createDeleteRequest")
+            android.util.Log.w("Tinyd", "API ${android.os.Build.VERSION.SDK_INT} too old for createDeleteRequest")
             viewModel.finalizeInPlace(context, confirmed = false)
         }
     }
@@ -771,7 +823,7 @@ fun InfoDialog(
             Column {
                  Text(stringResource(R.string.info_title), style = MaterialTheme.typography.titleLarge)
                  Text(
-                     "Green Compressor v${state.appInfoVersion} — by Dvoraak",
+                     "Tinyd v${state.appInfoVersion} — by Dvoraak",
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant,
                  )

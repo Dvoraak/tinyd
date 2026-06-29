@@ -5,23 +5,21 @@ plugins {
 }
 
 android {
-    namespace = "io.github.dvoraak.greencompressor"
+    namespace = "io.github.dvoraak.tinyd"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        // Distinct applicationId is THE thing that makes Android (and Obtainium)
-        // treat Green Compressor as a separate app from upstream Compressor.
-        // Without this, installing v1.0.0 on a phone that already has 1.5.7
-        // would either be rejected (signature mismatch) or silently replace it.
-        applicationId = "io.github.dvoraak.greencompressor"
+        // 2.0.0 rebrand from GreenCompressor → Tinyd. The applicationId
+        // change makes Android treat Tinyd as a distinct app from the old
+        // io.github.dvoraak.greencompressor install — they coexist; the
+        // user can uninstall the old one whenever they're ready.
+        applicationId = "io.github.dvoraak.tinyd"
         minSdk = 24
         targetSdk = 36
-        // Reset to 1 / 1.0.0 — this is the first release of Green Compressor
-        // as its own app, not a continuation of upstream's version numbers.
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 23
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

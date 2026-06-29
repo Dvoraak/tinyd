@@ -1,4 +1,4 @@
-package io.github.dvoraak.greencompressor
+package io.github.dvoraak.tinyd
 
 import org.junit.Test
 

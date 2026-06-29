@@ -48,7 +48,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "Found APK: $APK"
-          NEW_NAME="GreenCompressor-${GITHUB_REF_NAME}.apk"
+          NEW_NAME="Tinyd-${GITHUB_REF_NAME}.apk"
           cp "$APK" "$NEW_NAME"
           echo "apk_path=$NEW_NAME" >> $GITHUB_OUTPUT
 

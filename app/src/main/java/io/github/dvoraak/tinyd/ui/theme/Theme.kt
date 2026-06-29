@@ -1,4 +1,4 @@
-package io.github.dvoraak.greencompressor.ui.theme
+package io.github.dvoraak.tinyd.ui.theme
 
 import android.app.Activity
 import android.os.Build
