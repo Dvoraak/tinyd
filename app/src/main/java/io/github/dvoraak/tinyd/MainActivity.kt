@@ -565,7 +565,7 @@ fun CompressionFailedScreen(state: CompressorUiState, onBack: () -> Unit, onSave
                     
                     TextButton(
                         onClick = {
-                            uriHandler.openUri("https://github.com/Dvoraak/green-compressor/issues")
+                            uriHandler.openUri("https://github.com/Dvoraak/tinyd/issues")
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -886,7 +886,7 @@ fun InfoDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/Dvoraak/green-compressor") },
+                    onClick = { uriHandler.openUri("https://github.com/Dvoraak/tinyd") },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.view_on_github))

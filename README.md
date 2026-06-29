@@ -49,10 +49,8 @@ rewrites `mvhd`/`tkhd` `creation_time`. No new dependencies.
 1. Open Obtainium → **+** → paste the repo URL:
 
    ```
-   https://github.com/Dvoraak/green-compressor
+   https://github.com/Dvoraak/tinyd
    ```
-
-   (Repo name is still `green-compressor` — only the app rebranded.)
 
 2. Obtainium auto-detects the GitHub source and picks up the latest
    release. Tap **Add**. First install will prompt the "unknown source"
