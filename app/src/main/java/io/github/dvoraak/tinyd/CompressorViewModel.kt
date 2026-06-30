@@ -116,7 +116,7 @@ data class CompressorUiState(
     val totalSavedBytes: Long = 0L,
 
     val supportedCodecs: List<String> = emptyList(),
-    val appInfoVersion: String = "2.0.2",
+    val appInfoVersion: String = "2.0.3",
     val showBitrate: Boolean = false,
     val useMbps: Boolean = false,
     val hasShared: Boolean = false,
@@ -429,6 +429,29 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
         if (s.isCompressing) {
             android.util.Log.i(TAG, "Init: clearing stale isCompressing from a prior ViewModel that died mid-encode")
             _uiState.update { it.copy(isCompressing = false, progress = 0f, currentOutputSize = 0L) }
+        }
+
+        // Orphan-recovery branch. If the delete dialog was shown but the
+        // launcher result never came back (Activity destroyed mid-dialog),
+        // pendingFinalizations stays populated with .gc_pending_* files
+        // sitting IS_PENDING=1 in their original folders — invisible to
+        // galleries until finalized. Treat them as if the user denied:
+        // move them to Movies/Compressor with the safe _Compressed suffix.
+        // The user's compressed copies are preserved (just not in-place),
+        // and the originals are untouched (we only ever ask the system to
+        // delete via the dialog, never directly).
+        val orphaned = _uiState.value
+        if (orphaned.pendingFinalizations.isNotEmpty() &&
+            orphaned.pendingDeleteUris.isEmpty() &&
+            !orphaned.batchActive &&
+            !orphaned.isCompressing) {
+            android.util.Log.i(
+                TAG,
+                "Init: ${orphaned.pendingFinalizations.size} orphan in-place finalizations " +
+                    "from a previous session whose delete dialog never returned; " +
+                    "safely moving to Movies/Compressor (treat as denied)"
+            )
+            finalizeInPlace(getApplication(), confirmed = false)
         }
 
         clearCache()
@@ -904,6 +927,18 @@ class CompressorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun consumePendingDeletes() {
+        _uiState.update { it.copy(pendingDeleteUris = emptyList()) }
+    }
+
+    /**
+     * Wipes [pendingDeleteUris] from the state singleton immediately after the
+     * system delete dialog is launched. The PendingIntent we hand to Android
+     * has already captured the URI list, so the dialog still works — but with
+     * the state cleared, an Activity recreation (Android memory-pressure
+     * teardown while our foreground service keeps the process alive) won't
+     * cause the new composition's LaunchedEffect to re-fire a second dialog.
+     */
+    fun consumeDialogLaunchedUris() {
         _uiState.update { it.copy(pendingDeleteUris = emptyList()) }
     }
 

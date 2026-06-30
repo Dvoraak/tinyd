@@ -274,44 +274,40 @@ fun CompressorApp(viewModel: CompressorViewModel) {
     // LaunchedEffect would otherwise fire a second dialog on top of the first. We persist
     // the "already fired for these URIs" signature in SavedInstanceState so the new
     // composition can recognize it as a repeat.
-    var dialogFiredFor by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(state.pendingDeleteUris) {
         val urisToDelete = state.pendingDeleteUris
-        val signature = urisToDelete.joinToString("|") { it.toString() }
         android.util.Log.i(
             "Tinyd",
-            "LaunchedEffect(pendingDeleteUris) size=${urisToDelete.size} sdk=${android.os.Build.VERSION.SDK_INT} sigMatchesLast=${signature == dialogFiredFor && signature.isNotEmpty()}"
+            "LaunchedEffect(pendingDeleteUris) size=${urisToDelete.size} sdk=${android.os.Build.VERSION.SDK_INT}"
         )
-        if (urisToDelete.isEmpty()) {
-            dialogFiredFor = ""
-            return@LaunchedEffect
-        }
-        if (signature == dialogFiredFor) {
-            // Already showed (or just showed) a dialog for this exact set. The
-            // user's existing dialog is either still on screen or they already
-            // resolved it and finalizeInPlace is about to clear the list.
-            android.util.Log.i("Tinyd", "Skipping duplicate dialog launch for $signature")
-            return@LaunchedEffect
-        }
+        if (urisToDelete.isEmpty()) return@LaunchedEffect
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            dialogFiredFor = signature
             try {
+                // Build the PendingIntent first — it captures the URI list internally,
+                // so it's safe to wipe pendingDeleteUris from app state right after.
                 val pendingIntent = android.provider.MediaStore.createDeleteRequest(
                     context.contentResolver,
                     urisToDelete
                 )
                 android.util.Log.i("Tinyd", "createDeleteRequest built, launching IntentSender")
                 val request = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                // CRITICAL: clear pendingDeleteUris from the state singleton BEFORE
+                // launching the dialog. If Android destroys this Activity while the
+                // dialog is on screen (memory pressure with our foreground service
+                // running keeps the process alive but the Activity can still die),
+                // the new Activity inherits the empty state singleton and won't
+                // re-fire a second dialog. The PendingIntent we already built holds
+                // its own copy of the URI list, so the dialog itself still works.
+                // Orphan pendingFinalizations from a never-returned result are
+                // handled separately by the recovery branch in ViewModel.init.
+                viewModel.consumeDialogLaunchedUris()
                 deleteOriginalsLauncher.launch(request)
             } catch (e: Exception) {
-                // PendingIntent build threw — treat as "user denied" so any
-                // pending in-place saves still get unpended and moved out of
-                // the originals' folder. Without this they'd stay IS_PENDING
-                // forever and the user would lose their compressed copy.
                 android.util.Log.e("Tinyd", "createDeleteRequest failed", e)
                 viewModel.finalizeInPlace(context, confirmed = false)
             }
-        } else if (urisToDelete.isNotEmpty()) {
+        } else {
             android.util.Log.w("Tinyd", "API ${android.os.Build.VERSION.SDK_INT} too old for createDeleteRequest")
             viewModel.finalizeInPlace(context, confirmed = false)
         }
